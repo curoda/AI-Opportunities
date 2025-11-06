@@ -335,9 +335,15 @@ app.post('/', async (req, res) => {
   }
 });
 
-// Start server for Cloud Run
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on port ${PORT}`);
-});
+// Export for Functions Framework (so --target=generateOpportunities works)
+module.exports.generateOpportunities = app;
+
+// Only self-start the server when run directly (plain Express on Cloud Run)
+if (require.main === module) {
+  const PORT = process.env.PORT || 8080;
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server listening on port ${PORT}`);
+  });
+}
+
 
