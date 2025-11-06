@@ -303,10 +303,9 @@ VERIFICATION GUARDRAILS:
 // --- Google Sheets logging (unchanged) ---
 async function logToSheet(data) {
   try {
-    const serviceAccountKey = JSON.parse(process.env.SERVICE_ACCOUNT_KEY);
     const serviceAccountAuth = new JWT({
-      email: serviceAccountKey.client_email,
-      key: serviceAccountKey.private_key,
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
       scopes: ['https://www.googleapis.com/auth/spreadsheets']
     });
 
@@ -314,10 +313,12 @@ async function logToSheet(data) {
     await doc.loadInfo();
     const sheet = doc.sheetsByIndex[0];
 
+    // Format opportunities as text
     const opportunitiesText = data.opportunities.opportunities
       .map((opp, idx) => `${idx + 1}. ${opp.title}: ${opp.description}`)
       .join('\n\n');
 
+    // Format research as text
     const researchText = `PERSON: ${data.opportunities.research.person}\n\nROLE: ${data.opportunities.research.role}\n\nCOMPANY: ${data.opportunities.research.company}`;
 
     await sheet.addRow({
@@ -335,3 +336,4 @@ async function logToSheet(data) {
     throw error;
   }
 }
+
