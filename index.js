@@ -129,7 +129,7 @@ Return ONLY valid JSON (no markdown) in this exact schema:
       input: phase1Prompt,
       tool_choice: 'auto',
       tools: [{ type: 'web_search', sites: ['linkedin.com'] }],
-      response_format: { type: 'json_object' }, // enforce JSON
+      text: { format: 'json_object' }, // enforce JSON
       signal: controller1.signal
     });
     const phase1Text = cleanJsonText(getResponseText(phase1));
@@ -187,7 +187,7 @@ VERIFICATION GUARDRAILS:
       input: phase2Prompt,
       tool_choice: 'auto',
       tools: [{ type: 'web_search' }],
-      response_format: { type: 'json_object' }, // enforce JSON
+      text: { format: 'json_object' }, // enforce JSON
       signal: controller2.signal
     });
 
