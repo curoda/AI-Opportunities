@@ -1,19 +1,16 @@
 {
-  "name": "eiko-opportunities-function",
+  "name": "eiko-opportunities-service",
   "version": "1.0.0",
-  "description": "Google Cloud Function for EIKO AI Opportunity Generator",
   "main": "index.js",
   "private": true,
   "scripts": {
-    "start": "functions-framework --target=generateOpportunities"
+    "start": "node index.js"
   },
+  "engines": { "node": ">=20.0.0" },
   "dependencies": {
-    "@google-cloud/functions-framework": "^3.4.0",
-    "google-spreadsheet": "^4.1.2",
+    "express": "^4.19.2",
     "google-auth-library": "^9.6.3",
+    "google-spreadsheet": "^4.1.2",
     "openai": "^4.0.0"
-  },
-  "engines": {
-    "node": ">=20.0.0"
   }
 }
