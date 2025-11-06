@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<!-- 
+  EIKO AI Opportunity Finder - Squarespace Integration
+  
+  INSTRUCTIONS:
+  1. Replace YOUR_CLOUD_FUNCTION_URL_HERE on line 26 with your actual Cloud Function URL
+  2. Copy this entire file content
+  3. In Squarespace, add a "Code Block" to your page
+  4. Paste this code into the Code Block
+  5. Save and publish
+-->
+
+<div id="ai-opportunity-root"></div>
+
+<!-- Load Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Load React and ReactDOM -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<!-- Load Babel for JSX transformation -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+// CONFIGURATION: Your Cloud Function URL
+const CLOUD_FUNCTION_URL = 'https://generate-opportunities-309888300039.us-central1.run.app';
+
+const AIOpportunityGenerator = () => {
+  const [name, setName] = React.useState('');
+  const [title, setTitle] = React.useState('');
+  const [company, setCompany] = React.useState('');
+  const [isThinking, setIsThinking] = React.useState(false);
+  const [opportunities, setOpportunities] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  
+  const VERSION = "v1.3";
+  
+  const handleGenerate = async () => {
+    // Validate inputs
+    if (!name || !title || !company) {
+      alert('Please fill in all fields');
+      return;
+    }
+    
+    if (name.length > 100) {
+      alert('Name must be less than 100 characters');
+      return;
+    }
+    
+    if (title.length > 150) {
+      alert('Title must be less than 150 characters');
+      return;
+    }
+    
+    if (company.length > 150) {
+      alert('Company must be less than 150 characters');
+      return;
+    }
+    
+    setIsThinking(true);
+    setError(null);
+    
+    try {
+      console.log('Making API request...');
+      
+      const response = await fetch(CLOUD_FUNCTION_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: name.trim(),
+          title: title.trim(),
+          company: company.trim()
+        })
+      });
+      
+      console.log('Response status:', response.status);
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || `Server error: ${response.status}`);
+      }
+      
+      if (data.success && data.opportunities) {
+        setOpportunities(data.opportunities);
+      } else {
+        throw new Error(data.error || 'Failed to generate opportunities');
+      }
+      
+    } catch (err) {
+      console.error('Error:', err);
+      setError(`Error: ${err.message}. Check console for details.`);
+    } finally {
+      setIsThinking(false);
+    }
+  };
+  
+  const handleStartOver = () => {
+    setOpportunities(null);
+    setName('');
+    setTitle('');
+    setCompany('');
+    setError(null);
+  };
+  
+  const handleDownloadPDF = () => {
+    alert('PDF download feature coming soon!');
+  };
+  
+  if (isThinking) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-24 h-24 mx-auto mb-8 relative">
+            <div className="absolute inset-0 rounded-full bg-blue-600 opacity-20 animate-ping"></div>
+            <div className="absolute inset-0 rounded-full bg-blue-600 opacity-40 animate-pulse"></div>
+          </div>
+          <h2 className="text-2xl font-semibold text-gray-900 mb-3">
+            Researching opportunities...
+          </h2>
+          <p className="text-gray-600">
+            Analyzing {company} and {name}'s role
+          </p>
+          <p className="text-sm text-gray-500 mt-4">
+            This may take 30-60 seconds
+          </p>
+        </div>
+        <div className="absolute bottom-4 right-4 text-xs text-gray-400">{VERSION}</div>
+      </div>
+    );
+  }
+  
+  if (opportunities) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 py-16 px-6">
+        <div className="max-w-2xl mx-auto">
+          <div className="mb-12 text-center">
+            <h2 className="text-3xl font-bold text-gray-900 mb-3">
+              Opportunities for <span className="text-blue-600">{company}</span>
+            </h2>
+            <p className="text-lg text-gray-600">
+              Tailored AI opportunities for {name}, {title}
+            </p>
+          </div>
+          
+          {/* Research Section */}
+          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-8 mb-8">
+            <h3 className="text-2xl font-bold text-gray-900 mb-6">Research Findings</h3>
+            
+            <div className="space-y-6">
+              <div>
+                <h4 className="text-lg font-semibold text-gray-900 mb-2">About {name}</h4>
+                <p className="text-base text-gray-700 leading-relaxed whitespace-pre-line">
+                  {opportunities.research.person}
+                </p>
+              </div>
+              
+              <div>
+                <h4 className="text-lg font-semibold text-gray-900 mb-2">Role & Responsibilities</h4>
+                <p className="text-base text-gray-700 leading-relaxed whitespace-pre-line">
+                  {opportunities.research.role}
+                </p>
+              </div>
+              
+              <div>
+                <h4 className="text-lg font-semibold text-gray-900 mb-2">About {company}</h4>
+                <p className="text-base text-gray-700 leading-relaxed whitespace-pre-line">
+                  {opportunities.research.company}
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          {/* Opportunities Section */}
+          <h3 className="text-2xl font-bold text-gray-900 mb-6">AI Opportunities</h3>
+          
+          {opportunities.opportunities.map((opp, index) => (
+            <div 
+              key={index} 
+              className="bg-white border border-gray-100 rounded-2xl p-8 mb-5 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all"
+            >
+              <div className="inline-block w-8 h-8 leading-8 text-center bg-blue-600 text-white rounded-lg text-sm font-bold mb-4">
+                {index + 1}
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">{opp.title}</h3>
+              <p className="text-base text-gray-700 leading-relaxed">{opp.description}</p>
+            </div>
+          ))}
+          
+          <div className="flex gap-4 mt-12">
+            <button 
+              className="flex-1 px-8 py-4 font-semibold text-blue-600 bg-white border-2 border-blue-600 rounded-xl hover:bg-blue-50 transition-all"
+              onClick={handleStartOver}
+            >
+              Start Over
+            </button>
+            <button 
+              className="flex-1 px-8 py-4 font-semibold text-white bg-blue-600 rounded-xl shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all"
+              onClick={handleDownloadPDF}
+            >
+              Download PDF
+            </button>
+          </div>
+        </div>
+        <div className="text-center mt-8 text-xs text-gray-400">{VERSION}</div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 py-16 px-6">
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center mb-16">
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">hello EIKO</h1>
+          <p className="text-lg text-gray-600">
+            Discover tailored AI opportunities for your organization
+          </p>
+          <p className="text-xs text-gray-400 mt-2">{VERSION}</p>
+        </div>
+        
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+            {error}
+            <p className="mt-2 text-xs">Open browser console (F12) for more details</p>
+          </div>
+        )}
+        
+        <div className="space-y-6">
+          <div>
+            <label className="block text-sm font-semibold text-gray-900 mb-2">Your Name</label>
+            <input
+              type="text"
+              className="w-full px-5 py-4 border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+              placeholder="Jane Smith"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength="100"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-semibold text-gray-900 mb-2">Your Title</label>
+            <input
+              type="text"
+              className="w-full px-5 py-4 border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+              placeholder="Chief Operating Officer"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength="150"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-semibold text-gray-900 mb-2">Company Name</label>
+            <input
+              type="text"
+              className="w-full px-5 py-4 border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+              placeholder="Acme Corporation"
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
+              maxLength="150"
+            />
+          </div>
+          
+          <button 
+            type="button"
+            onClick={handleGenerate}
+            className="w-full px-8 py-5 text-lg font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:scale-98 transition-all mt-8"
+          >
+            Generate AI Opportunities
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Render the component
+ReactDOM.render(<AIOpportunityGenerator />, document.getElementById('ai-opportunity-root'));
+</script>
