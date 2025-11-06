@@ -1,6 +1,9 @@
 // index.js — Cloud Run (Express) or Functions Framework compatible
 // - Robust CORS (preflight handled first)
 // - Two-phase research with OpenAI Responses API + web_search
+//   * Each phase now runs in two steps to satisfy API constraints:
+//     A) Research with web_search (no json mode)
+//     B) Structure to strict JSON (no tools, json_object mode)
 // - Logs to Google Sheets
 // - Exports Express app for Functions Framework; self-listens for plain Express
 
@@ -93,6 +96,7 @@ function getResponseText(resp) {
 async function generateOpportunities(name, title, company) {
   const openai = await getOpenAI();
   const model = process.env.OPENAI_MODEL || 'gpt-5';
+  const timeoutMs = Number(process.env.OPENAI_TIMEOUT_MS || 60000);
 
   // ---------- Phase 1: LinkedIn-only verification ----------
   const phase1Prompt = `
@@ -104,12 +108,37 @@ INPUT:
 - Company (claimed): ${company}
 
 INSTRUCTIONS:
-1) Use the web_search tool restricted to linkedin.com to find the person's profile and confirm employment at the EXACT company (not a lookalike).
+1) Use the web_search tool to find the person's LinkedIn profile and confirm employment at the EXACT company (not a lookalike).
 2) If multiple profiles exist, pick the one that most clearly matches the name + company + title.
 3) If you cannot conclusively verify on LinkedIn, set "verified" to false.
 
-RESPONSE:
-Return ONLY valid JSON (no markdown) in this exact schema:
+Return your findings in concise notes (no JSON yet). Include any LinkedIn URLs you used. 
+`.trim();
+
+  const controller1 = new AbortController();
+  const t1 = setTimeout(() => controller1.abort(), timeoutMs);
+  let p1;
+
+  try {
+    // ---- Phase 1A: research with tools (no JSON mode) ----
+    const phase1A = await openai.responses.create(
+      {
+        model,
+        input: phase1Prompt,
+        tool_choice: 'auto',
+        tools: [{ type: 'web_search' }]
+      },
+      {
+        signal: controller1.signal,
+        timeout: timeoutMs
+      }
+    );
+    const phase1Atext = cleanJsonText(getResponseText(phase1A));
+
+    // ---- Phase 1B: structure to strict JSON (no tools, JSON mode) ----
+    const phase1Bprompt = `
+Convert the following research notes into STRICT JSON with this schema:
+
 {
   "verified": boolean,
   "linkedin_url": "string or null",
@@ -118,33 +147,47 @@ Return ONLY valid JSON (no markdown) in this exact schema:
   "company_on_linkedin": "string or null",
   "evidence": ["list of linkedin URLs you used"],
   "notes": "brief explanation"
-}`.trim();
+}
 
-  const controller1 = new AbortController();
-  const t1 = setTimeout(() => controller1.abort(), Number(process.env.OPENAI_TIMEOUT_MS || 60000));
-  let p1;
-  try {
-    const phase1 = await openai.responses.create(
-  {
-    model,
-    input: phase1Prompt,                 // your prompt already says "LinkedIn ONLY"
-    tool_choice: 'auto',
-    tools: [{ type: 'web_search' }],     // ⬅️ removed `sites`
-    text: { format: { type: 'json_object' } }  // ⬅️ correct shape
-  },
-  {
-    signal: controller1.signal,
-    timeout: Number(process.env.OPENAI_TIMEOUT_MS || 60000)
-  }
-);
+Rules:
+- Output ONLY the JSON object.
+- No markdown or commentary.
+- Use null for missing fields.
 
-    const phase1Text = cleanJsonText(getResponseText(phase1));
-    p1 = JSON.parse(phase1Text || '{}');
+Research notes:
+${phase1Atext}
+`.trim();
+
+    const phase1B = await openai.responses.create(
+      {
+        model,
+        input: phase1Bprompt,
+        text: { format: { type: 'json_object' } } // enforce JSON
+      },
+      {
+        signal: controller1.signal,
+        timeout: timeoutMs
+      }
+    );
+
+    const phase1Text = cleanJsonText(getResponseText(phase1B));
+    try {
+      p1 = JSON.parse(phase1Text || '{}');
+    } catch (e) {
+      console.error('Phase 1 parse error:', e?.message || e);
+      console.error('Phase 1 raw text (truncated):', (phase1Text || '').slice(0, 1200));
+      throw new Error('Failed to parse Phase 1 JSON');
+    }
   } catch (e) {
     console.error('Phase 1 error:', e?.message || e);
     p1 = {
-      verified: false, linkedin_url: null, full_name: null,
-      title_on_linkedin: null, company_on_linkedin: null, evidence: [], notes: 'Phase 1 failed'
+      verified: false,
+      linkedin_url: null,
+      full_name: null,
+      title_on_linkedin: null,
+      company_on_linkedin: null,
+      evidence: [],
+      notes: 'Phase 1 failed'
     };
   } finally {
     clearTimeout(t1);
@@ -154,55 +197,82 @@ Return ONLY valid JSON (no markdown) in this exact schema:
   const phase2Prompt = `
 You will generate AI opportunities for a SPECIFIC INDIVIDUAL at their company.
 
-CONTEXT FROM LINKEDIN VERIFICATION:
+CONTEXT FROM LINKEDIN VERIFICATION (JSON):
 ${JSON.stringify(p1, null, 2)}
 
 RESEARCH RULES:
 - Use the web_search tool to find current, reliable info.
 - Start from the LinkedIn verification context above. If "verified" is false, attempt careful verification via other reputable sources (company site bio, press releases).
-- CRITICAL: Do not confuse people/companies with similar names. If you cannot verify that ${name} works at ${company}, state this clearly in "research.person".
-- Include source URLs INSIDE the JSON fields you return (they must specifically mention BOTH the person and the company for person/role sections).
+- CRITICAL: Do not confuse people/companies with similar names. If you cannot verify that ${name} works at ${company}, state this clearly in the person findings.
 - Prefer company site, newsroom, reputable press, and the LinkedIn profile found in Phase 1.
 
-OUTPUT FORMAT (JSON ONLY):
+TASK:
+- Write concise research notes (no JSON yet) covering:
+  1) PERSON: what you found about ${name} and whether they actually work at ${company} (include 2–5 URLs that mention both).
+  2) ROLE: day-to-day at ${company}, grounded in sources (include URLs).
+  3) COMPANY: what ${company} actually does; industry, products/services, scale (include URLs).
+
+- Then suggest 3–6 concrete AI opportunities tailored to ${name}'s role at ${company}.
+`.trim();
+
+  const controller2 = new AbortController();
+  const t2 = setTimeout(() => controller2.abort(), timeoutMs);
+  let finalObj;
+
+  try {
+    // ---- Phase 2A: research with tools (no JSON mode) ----
+    const phase2A = await openai.responses.create(
+      {
+        model,
+        input: phase2Prompt,
+        tool_choice: 'auto',
+        tools: [{ type: 'web_search' }]
+      },
+      {
+        signal: controller2.signal,
+        timeout: timeoutMs
+      }
+    );
+    const phase2Atext = cleanJsonText(getResponseText(phase2A));
+
+    // ---- Phase 2B: structure to strict JSON (no tools, JSON mode) ----
+    const phase2Bprompt = `
+Convert the following research notes into STRICT JSON with this exact shape:
+
 {
   "research": {
-    "person": "Paragraph with findings + source URLs.",
-    "role": "Paragraph with role-specific detail + source URLs.",
-    "company": "Paragraph about the correct company + source URLs."
+    "person": "string",
+    "role": "string",
+    "company": "string"
   },
   "opportunities": [
-    {
-      "title": "5-8 word opportunity title",
-      "description": "2-3 sentences on how this helps ${name} specifically in their actual role."
-    }
+    { "title": "string", "description": "string" }
   ]
 }
 
-VERIFICATION GUARDRAILS:
-- If any source refers to a different person or different company, ignore it.
-- If you remain uncertain, say "I could not verify..." in "research.person".
-- Return ONLY raw JSON (no markdown).`.trim();
+Rules:
+- Output ONLY the JSON object (no markdown/comments).
+- If verification is uncertain, say "I could not verify..." inside "research.person".
+- Keep 3–6 opportunities.
+- Preserve any source URLs (append or inline as text).
 
-  const controller2 = new AbortController();
-  const t2 = setTimeout(() => controller2.abort(), Number(process.env.OPENAI_TIMEOUT_MS || 60000));
-  let finalObj;
-  try {
-    const phase2 = await openai.responses.create(
-  {
-    model,
-    input: phase2Prompt,
-    tool_choice: 'auto',
-    tools: [{ type: 'web_search' }],
-    text: { format: { type: 'json_object' } }  // ⬅️ correct shape
-  },
-  {
-    signal: controller2.signal,
-    timeout: Number(process.env.OPENAI_TIMEOUT_MS || 60000)
-  }
-);
+Research notes:
+${phase2Atext}
+`.trim();
 
-    const phase2Text = cleanJsonText(getResponseText(phase2));
+    const phase2B = await openai.responses.create(
+      {
+        model,
+        input: phase2Bprompt,
+        text: { format: { type: 'json_object' } } // enforce JSON
+      },
+      {
+        signal: controller2.signal,
+        timeout: timeoutMs
+      }
+    );
+
+    const phase2Text = cleanJsonText(getResponseText(phase2B));
     let parsed;
     try {
       parsed = JSON.parse(phase2Text);
@@ -351,7 +421,7 @@ app.post('/', async (req, res) => {
     return res.json({ success: true, opportunities });
   } catch (error) {
     console.error('Error:', error);
-    const userMessage = String(error?.message || '').includes('Failed to parse AI response')
+    const userMessage = String(error?.message || '').includes('Failed to parse')
       ? 'The research service returned an unexpected format. Please try again.'
       : (String(error?.message || '').includes('API')
          ? 'Service temporarily unavailable. Please try again.'
