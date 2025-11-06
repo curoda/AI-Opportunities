@@ -1,6 +1,8 @@
-// index.js — Cloud Run (Express)
-// Server listens on PORT, handles robust CORS preflight, runs two-phase research,
-// and logs results to Google Sheets.
+// index.js — Cloud Run (Express) or Functions Framework compatible
+// - Robust CORS (preflight handled first)
+// - Two-phase research with OpenAI Responses API + web_search
+// - Logs to Google Sheets
+// - Exports Express app for Functions Framework; self-listens for plain Express
 
 const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
@@ -8,14 +10,8 @@ const { JWT } = require('google-auth-library');
 
 // --- Boot diagnostics ---
 console.log('Booting generate-opportunities service (Node', process.version, ')');
-
-process.on('unhandledRejection', (err) => {
-  console.error('UNHANDLED REJECTION:', err);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('UNCAUGHT EXCEPTION:', err);
-});
+process.on('unhandledRejection', (err) => console.error('UNHANDLED REJECTION:', err));
+process.on('uncaughtException', (err) => console.error('UNCAUGHT EXCEPTION:', err));
 
 // -------------------- Utilities --------------------
 function requireEnv(name) {
@@ -98,7 +94,7 @@ async function generateOpportunities(name, title, company) {
   const openai = await getOpenAI();
   const model = process.env.OPENAI_MODEL || 'gpt-5';
 
-  // Phase 1: LinkedIn-only verification
+  // ---------- Phase 1: LinkedIn-only verification ----------
   const phase1Prompt = `
 You are a precise researcher. First, verify a person's identity and current employer using LinkedIn ONLY.
 
@@ -110,7 +106,7 @@ INPUT:
 INSTRUCTIONS:
 1) Use the web_search tool restricted to linkedin.com to find the person's profile and confirm employment at the EXACT company (not a lookalike).
 2) If multiple profiles exist, pick the one that most clearly matches the name + company + title.
-3) If you cannot conclusively verify the person and the company on LinkedIn, set "verified" to false.
+3) If you cannot conclusively verify on LinkedIn, set "verified" to false.
 
 RESPONSE:
 Return ONLY valid JSON (no markdown) in this exact schema:
@@ -133,12 +129,13 @@ Return ONLY valid JSON (no markdown) in this exact schema:
       input: phase1Prompt,
       tool_choice: 'auto',
       tools: [{ type: 'web_search', sites: ['linkedin.com'] }],
+      response_format: { type: 'json_object' }, // enforce JSON
       signal: controller1.signal
     });
     const phase1Text = cleanJsonText(getResponseText(phase1));
     p1 = JSON.parse(phase1Text || '{}');
   } catch (e) {
-    console.error('Phase 1 error:', e);
+    console.error('Phase 1 error:', e?.message || e);
     p1 = {
       verified: false, linkedin_url: null, full_name: null,
       title_on_linkedin: null, company_on_linkedin: null, evidence: [], notes: 'Phase 1 failed'
@@ -147,7 +144,7 @@ Return ONLY valid JSON (no markdown) in this exact schema:
     clearTimeout(t1);
   }
 
-  // Phase 2: broader research & opportunities
+  // ---------- Phase 2: broader research & opportunities ----------
   const phase2Prompt = `
 You will generate AI opportunities for a SPECIFIC INDIVIDUAL at their company.
 
@@ -157,7 +154,7 @@ ${JSON.stringify(p1, null, 2)}
 RESEARCH RULES:
 - Use the web_search tool to find current, reliable info.
 - Start from the LinkedIn verification context above. If "verified" is false, attempt careful verification via other reputable sources (company site bio, press releases).
-- CRITICAL: Do not confuse people or companies with similar names. If you cannot verify that ${name} works at ${company}, state this clearly in "research.person".
+- CRITICAL: Do not confuse people/companies with similar names. If you cannot verify that ${name} works at ${company}, state this clearly in "research.person".
 - Include source URLs INSIDE the JSON fields you return (they must specifically mention BOTH the person and the company for person/role sections).
 - Prefer company site, newsroom, reputable press, and the LinkedIn profile found in Phase 1.
 
@@ -190,19 +187,35 @@ VERIFICATION GUARDRAILS:
       input: phase2Prompt,
       tool_choice: 'auto',
       tools: [{ type: 'web_search' }],
+      response_format: { type: 'json_object' }, // enforce JSON
       signal: controller2.signal
     });
-    const phase2Text = cleanJsonText(getResponseText(phase2));
-    finalObj = JSON.parse(phase2Text);
 
-    if (!finalObj?.research || !finalObj?.opportunities) throw new Error('Invalid response format - missing research or opportunities');
-    if (!Array.isArray(finalObj.opportunities) || finalObj.opportunities.length === 0) throw new Error('Invalid response format - opportunities must be an array');
-    for (const opp of finalObj.opportunities) if (!opp.title || !opp.description) throw new Error('Invalid opportunity format');
-    const r = finalObj.research;
+    const phase2Text = cleanJsonText(getResponseText(phase2));
+    let parsed;
+    try {
+      parsed = JSON.parse(phase2Text);
+    } catch (e) {
+      console.error('Phase 2 parse error:', e?.message || e);
+      console.error('Phase 2 raw text (truncated):', (phase2Text || '').slice(0, 1500));
+      throw new Error('Failed to parse AI response');
+    }
+
+    // Schema validation
+    if (!parsed?.research || !parsed?.opportunities) {
+      console.error('Phase 2 schema missing keys. Raw (truncated):', (phase2Text || '').slice(0, 1500));
+      throw new Error('Invalid response format - missing research or opportunities');
+    }
+    if (!Array.isArray(parsed.opportunities) || parsed.opportunities.length === 0) {
+      throw new Error('Invalid response format - opportunities must be an array');
+    }
+    for (const opp of parsed.opportunities) {
+      if (!opp.title || !opp.description) throw new Error('Invalid opportunity format');
+    }
+    const r = parsed.research;
     if (!r.person || !r.role || !r.company) throw new Error('Invalid research format');
-  } catch (e) {
-    console.error('Phase 2 parse error:', e);
-    throw new Error('Failed to parse AI response');
+
+    finalObj = parsed;
   } finally {
     clearTimeout(t2);
   }
@@ -262,7 +275,7 @@ function setCorsHeaders(req, res) {
   const reqHeaders = req.headers['access-control-request-headers'];
   const reqMethod  = req.headers['access-control-request-method'];
 
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
   res.setHeader('Access-Control-Allow-Headers', reqHeaders || 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '3600');
   res.setHeader('Vary', 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method');
@@ -282,7 +295,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// extra safety for any OPTIONS path
 app.options('*', (req, res) => {
   setCorsHeaders(req, res);
   return res.status(204).end();
@@ -328,22 +340,23 @@ app.post('/', async (req, res) => {
     return res.json({ success: true, opportunities });
   } catch (error) {
     console.error('Error:', error);
-    const userMessage = String(error?.message || '').includes('API')
-      ? 'Service temporarily unavailable. Please try again.'
-      : 'An error occurred. Please try again.';
-    return res.status(500).json({ success: false, error: userMessage });
+    const userMessage = String(error?.message || '').includes('Failed to parse AI response')
+      ? 'The research service returned an unexpected format. Please try again.'
+      : (String(error?.message || '').includes('API')
+         ? 'Service temporarily unavailable. Please try again.'
+         : 'An error occurred. Please try again.');
+    return res.status(502).json({ success: false, error: userMessage });
   }
 });
 
-// Export for Functions Framework (so --target=generateOpportunities works)
+// ---- Make it run in BOTH modes ----
+// 1) Export for Functions Framework (so --target=generateOpportunities works)
 module.exports.generateOpportunities = app;
 
-// Only self-start the server when run directly (plain Express on Cloud Run)
+// 2) Self-start the server when run directly (plain Express on Cloud Run)
 if (require.main === module) {
   const PORT = process.env.PORT || 8080;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on port ${PORT}`);
   });
 }
-
-
