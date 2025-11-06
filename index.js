@@ -96,7 +96,7 @@ function getResponseText(resp) {
 async function generateOpportunities(name, title, company) {
   const openai = await getOpenAI();
   const model = process.env.OPENAI_MODEL || 'gpt-5';
-  const timeoutMs = Number(process.env.OPENAI_TIMEOUT_MS || 60000);
+  const timeoutMs = Number(process.env.OPENAI_TIMEOUT_MS || 240000);
 
   // ---------- Phase 1: LinkedIn-only verification ----------
   const phase1Prompt = `
