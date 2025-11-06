@@ -124,14 +124,19 @@ Return ONLY valid JSON (no markdown) in this exact schema:
   const t1 = setTimeout(() => controller1.abort(), Number(process.env.OPENAI_TIMEOUT_MS || 60000));
   let p1;
   try {
-    const phase1 = await openai.responses.create({
-      model,
-      input: phase1Prompt,
-      tool_choice: 'auto',
-      tools: [{ type: 'web_search', sites: ['linkedin.com'] }],
-      text: { format: 'json_object' }, // enforce JSON
-      signal: controller1.signal
-    });
+    const phase1 = await openai.responses.create(
+  {
+    model,
+    input: phase1Prompt,
+    tool_choice: 'auto',
+    tools: [{ type: 'web_search', sites: ['linkedin.com'] }],
+    text: { format: 'json_object' }
+  },
+  {
+    signal: controller1.signal,
+    timeout: Number(process.env.OPENAI_TIMEOUT_MS || 60000)
+  }
+);
     const phase1Text = cleanJsonText(getResponseText(phase1));
     p1 = JSON.parse(phase1Text || '{}');
   } catch (e) {
@@ -182,14 +187,19 @@ VERIFICATION GUARDRAILS:
   const t2 = setTimeout(() => controller2.abort(), Number(process.env.OPENAI_TIMEOUT_MS || 60000));
   let finalObj;
   try {
-    const phase2 = await openai.responses.create({
-      model,
-      input: phase2Prompt,
-      tool_choice: 'auto',
-      tools: [{ type: 'web_search' }],
-      text: { format: 'json_object' }, // enforce JSON
-      signal: controller2.signal
-    });
+    const phase2 = await openai.responses.create(
+  {
+    model,
+    input: phase2Prompt,
+    tool_choice: 'auto',
+    tools: [{ type: 'web_search' }],
+    text: { format: 'json_object' }
+  },
+  {
+    signal: controller2.signal,           // ✅
+    timeout: Number(process.env.OPENAI_TIMEOUT_MS || 60000)
+  }
+);
 
     const phase2Text = cleanJsonText(getResponseText(phase2));
     let parsed;
