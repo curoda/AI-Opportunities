@@ -1,11 +1,19 @@
 // index.js — Cloud Run (Express)
-// Same business logic as your function version, now behind an Express server.
+// Server listens on PORT, handles robust CORS preflight, runs two-phase research,
+// and logs results to Google Sheets.
 
 const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 
-// ---------- OpenAI (lazy import to keep CommonJS) ----------
+// -------------------- Utilities --------------------
+function requireEnv(name) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing required environment variable: ${name}`);
+  return v;
+}
+
+// Lazy-load OpenAI (works with CommonJS)
 let _openai;
 async function getOpenAI() {
   if (_openai) return _openai;
@@ -14,25 +22,18 @@ async function getOpenAI() {
   return _openai;
 }
 
-// ---------- Utilities ----------
-function requireEnv(name) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required environment variable: ${name}`);
-  return v;
-}
-
-// Simple in-memory rate limiter (same as before)
+// Simple in-memory rate limiter (per-instance)
 const rateLimiter = {
   requests: new Map(),
-  windowMs: 60000,
+  windowMs: 60_000,
   maxRequests: 10,
   check(ip) {
     const now = Date.now();
-    const userRequests = this.requests.get(ip) || [];
-    const recentRequests = userRequests.filter((t) => now - t < this.windowMs);
-    if (recentRequests.length >= this.maxRequests) return false;
-    recentRequests.push(now);
-    this.requests.set(ip, recentRequests);
+    const list = this.requests.get(ip) || [];
+    const recent = list.filter((t) => now - t < this.windowMs);
+    if (recent.length >= this.maxRequests) return false;
+    recent.push(now);
+    this.requests.set(ip, recent);
     if (Math.random() < 0.01) this.cleanup(now);
     return true;
   },
@@ -45,21 +46,19 @@ const rateLimiter = {
   }
 };
 
-// Validation (same)
 function validateInput(name, title, company) {
   const errors = [];
   if (!name || !title || !company) errors.push('All fields are required');
   if (name && name.length > 100) errors.push('Name must be less than 100 characters');
   if (title && title.length > 150) errors.push('Title must be less than 150 characters');
   if (company && company.length > 150) errors.push('Company must be less than 150 characters');
-  const suspiciousPattern = /<script|javascript:|on\w+=/i;
-  if (suspiciousPattern.test(name || '') || suspiciousPattern.test(title || '') || suspiciousPattern.test(company || '')) {
+  const suspicious = /<script|javascript:|on\w+=/i;
+  if (suspicious.test(name || '') || suspicious.test(title || '') || suspicious.test(company || '')) {
     errors.push('Invalid characters detected');
   }
   return errors;
 }
 
-// Helpers
 function getClientIp(req) {
   return (
     req.headers['x-forwarded-for']?.split(',')[0] ||
@@ -83,7 +82,7 @@ function getResponseText(resp) {
   }
 }
 
-// ---------- Core orchestration ----------
+// -------------------- Core orchestration --------------------
 async function generateOpportunities(name, title, company) {
   const openai = await getOpenAI();
   const model = process.env.OPENAI_MODEL || 'gpt-5';
@@ -185,15 +184,9 @@ VERIFICATION GUARDRAILS:
     const phase2Text = cleanJsonText(getResponseText(phase2));
     finalObj = JSON.parse(phase2Text);
 
-    if (!finalObj?.research || !finalObj?.opportunities) {
-      throw new Error('Invalid response format - missing research or opportunities');
-    }
-    if (!Array.isArray(finalObj.opportunities) || finalObj.opportunities.length === 0) {
-      throw new Error('Invalid response format - opportunities must be an array');
-    }
-    for (const opp of finalObj.opportunities) {
-      if (!opp.title || !opp.description) throw new Error('Invalid opportunity format');
-    }
+    if (!finalObj?.research || !finalObj?.opportunities) throw new Error('Invalid response format - missing research or opportunities');
+    if (!Array.isArray(finalObj.opportunities) || finalObj.opportunities.length === 0) throw new Error('Invalid response format - opportunities must be an array');
+    for (const opp of finalObj.opportunities) if (!opp.title || !opp.description) throw new Error('Invalid opportunity format');
     const r = finalObj.research;
     if (!r.person || !r.role || !r.company) throw new Error('Invalid research format');
   } catch (e) {
@@ -206,7 +199,7 @@ VERIFICATION GUARDRAILS:
   return finalObj;
 }
 
-// ---------- Google Sheets logging ----------
+// -------------------- Google Sheets logging --------------------
 async function logToSheet(data) {
   try {
     const serviceAccountAuth = new JWT({
@@ -241,11 +234,11 @@ async function logToSheet(data) {
   }
 }
 
-// ---------- Express server ----------
+// -------------------- Express server (Cloud Run) --------------------
 const app = express();
-app.use(express.json());
+app.enable('trust proxy'); // correct client IPs via x-forwarded-for
 
-// ----- Robust CORS (place before routes) -----
+// CORS FIRST (preflight before anything else)
 const allowedOrigins = new Set([
   'https://helloeiko.com',
   'https://www.helloeiko.com',
@@ -253,38 +246,44 @@ const allowedOrigins = new Set([
   'http://www.helloeiko.com'
 ]);
 
-app.use((req, res, next) => {
+function setCorsHeaders(req, res) {
   const origin = req.headers.origin;
   const reqHeaders = req.headers['access-control-request-headers'];
   const reqMethod  = req.headers['access-control-request-method'];
 
-  // Always advertise capabilities (helps caches & proxies)
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', reqHeaders || 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '3600');
   res.setHeader('Vary', 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method');
 
-  // Reflect only approved origins
   if (origin && allowedOrigins.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    // If you ever use cookies/credentials, also set:
-    // res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
+}
 
-  // Short-circuit preflight
+app.use((req, res, next) => {
+  setCorsHeaders(req, res);
   if (req.method === 'OPTIONS') {
+    const reqMethod = req.headers['access-control-request-method'];
     if (reqMethod) res.setHeader('Access-Control-Allow-Methods', reqMethod);
     return res.status(204).end();
   }
-
   next();
 });
 
+// extra safety for any OPTIONS path
+app.options('*', (req, res) => {
+  setCorsHeaders(req, res);
+  return res.status(204).end();
+});
 
-// Health check (useful for Cloud Run)
+// parse JSON after CORS
+app.use(express.json());
+
+// Health check
 app.get('/', (_req, res) => res.status(200).send('ok'));
 
-// Main endpoint (POST /)
+// Main endpoint
 app.post('/', async (req, res) => {
   const ct = (req.get('content-type') || '').toLowerCase();
   if (!ct.startsWith('application/json')) {
