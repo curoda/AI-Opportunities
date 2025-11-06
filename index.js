@@ -6,6 +6,17 @@ const express = require('express');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 
+// --- Boot diagnostics ---
+console.log('Booting generate-opportunities service (Node', process.version, ')');
+
+process.on('unhandledRejection', (err) => {
+  console.error('UNHANDLED REJECTION:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION:', err);
+});
+
 // -------------------- Utilities --------------------
 function requireEnv(name) {
   const v = process.env[name];
@@ -326,6 +337,7 @@ app.post('/', async (req, res) => {
 
 // Start server for Cloud Run
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server listening on port ${PORT}`);
 });
+
