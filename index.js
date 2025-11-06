@@ -176,80 +176,76 @@ functions.http('generateOpportunities', async (req, res) => {
 async function generateOpportunities(name, title, company) {
   const prompt = `You are researching AI opportunities for a SPECIFIC INDIVIDUAL at their company. 
 
+CRITICAL: You must verify you're researching the CORRECT person at the CORRECT company. Do not confuse similar company names or people with similar names.
+
 CONTACT INFORMATION:
 - Name: ${name}
 - Title: ${title}
 - Company: ${company}
 
-YOUR TASK:
+YOUR RESEARCH PROCESS:
 
-PART 1: CONDUCT THOROUGH RESEARCH (Use web search for all of this)
+STEP 1: FIND THE PERSON FIRST
+- Search for "${name} LinkedIn" to find their LinkedIn profile
+- Search for "${name} ${title}" to find information about this specific person
+- Look for their professional profiles, company bio, articles, interviews, or news mentions
+- VERIFY they actually work at ${company} - do not proceed if you can't confirm this
 
-Research ${name} specifically:
-- Search for "${name} ${company}" to find information about this specific person
-- Look for their LinkedIn profile, bio on company website, interviews, articles, mentions in news
-- Find what THEY specifically work on, their projects, focus areas, responsibilities
-- Identify their actual day-to-day activities and sphere of influence
+STEP 2: VERIFY THE COMPANY MATCH
+- Once you find information about ${name}, verify it mentions ${company}
+- Be careful: "${company}" might have similar names to other companies
+- If you find ${name} at a DIFFERENT company, do NOT use that information
+- Only use information where ${name} and ${company} appear together
+- If you cannot verify ${name} works at ${company}, state this clearly in your research
 
-Research ${company}:
-- Understand the company's industry and business model
-- Learn about their products, services, and market position
-- Identify the company's scale, location, and key challenges
+STEP 3: RESEARCH ${name}'S ACTUAL ROLE
+- What does ${name} specifically do at ${company}?
+- What projects are they working on?
+- What are their responsibilities?
+- What is their sphere of influence?
+- What challenges do they face in their role?
 
-Research the role of "${title}" at ${company}:
-- What does someone with this title typically do at a company like this?
-- What are their likely responsibilities and pain points?
-- What can they control or influence?
+STEP 4: RESEARCH ${company} (THE RIGHT ONE)
+- What does ${company} actually do? (industry, products, services)
+- What is their business model?
+- Where are they located?
+- What scale are they operating at?
 
-PART 2: DOCUMENT YOUR RESEARCH FINDINGS
-
-Write 2-3 paragraphs summarizing your research:
-
-Paragraph 1 - About ${name}:
-Write a paragraph about who ${name} is, what you learned about them, their background, and their specific role at ${company}. Include the URLs of sources where you found this information.
-
-Paragraph 2 - About ${name}'s Role & Responsibilities:
-Write a paragraph about what ${name} likely does day-to-day in their role as ${title} at ${company}, what they're responsible for, what challenges they face, and what they can control or influence. Include URLs of sources.
-
-Paragraph 3 - About ${company}:
-Write a paragraph about what ${company} does, their industry, their products/services, their scale, and any relevant context about the company. Include URLs of sources.
-
-PART 3: GENERATE 3-6 AI OPPORTUNITIES
-
-Based on your research, generate 3-6 AI opportunities specifically tailored to ${name} and their actual responsibilities. Each opportunity should:
-- Be something ${name} can actually implement or champion given their role
-- Address specific challenges THEY face in their work
-- Be relevant to their sphere of control and influence
-- NOT be generic company-wide initiatives unless they clearly fall under this person's domain
-
-For each opportunity, provide:
-- A clear, specific title (5-8 words)
-- A detailed description (2-3 sentences) explaining what the AI solution does and how it helps ${name} specifically
+STEP 5: GENERATE OPPORTUNITIES
+- Generate 3-6 AI opportunities specifically for ${name}'s actual role
+- Base opportunities on what ${name} can realistically implement or champion
+- Focus on THEIR specific challenges and responsibilities
+- Do NOT suggest broad company-wide initiatives unless they're clearly in ${name}'s domain
 
 RESPONSE FORMAT:
 
 Return your response as a JSON object with this EXACT structure:
 {
   "research": {
-    "person": "Paragraph about ${name} with their background and role. Include source URLs.",
-    "role": "Paragraph about ${name}'s responsibilities and day-to-day work as ${title}. Include source URLs.",
-    "company": "Paragraph about ${company} and what they do. Include source URLs."
+    "person": "Write a paragraph about ${name}. Include what you found about them, their actual role at ${company}, and their background. If you found they work at a DIFFERENT company or couldn't verify they work at ${company}, state that clearly. Include source URLs that specifically mention both ${name} AND ${company} together.",
+    "role": "Write a paragraph about what ${name} does day-to-day as ${title} at ${company}. Base this on actual information you found about ${name}, not just generic responsibilities for the title. If you couldn't find specific information about ${name}, say so. Include source URLs.",
+    "company": "Write a paragraph about ${company} (the company where ${name} works). Make sure this is the CORRECT ${company}, not a different company with a similar name. Include what they do, their industry, and relevant context. Include source URLs."
   },
   "opportunities": [
     {
-      "title": "Opportunity title here",
-      "description": "Detailed description here."
+      "title": "Opportunity title here (5-8 words)",
+      "description": "Detailed description (2-3 sentences) of how this helps ${name} specifically in their actual role."
     }
   ]
 }
 
-CRITICAL RULES:
-- Use web search to find real information about ${name} and ${company}
-- Include actual source URLs in your research paragraphs
-- Make opportunities specific to what ${name} can actually do in their role
+CRITICAL VERIFICATION RULES:
+- If you find information about "${name}" at a company OTHER than "${company}", DO NOT USE IT
+- If you find a company with a similar name to "${company}" but it's a different business, DO NOT USE IT
+- If you cannot verify ${name} works at ${company}, state this explicitly in the "person" section
+- Only include source URLs that specifically mention BOTH ${name} AND ${company}
+- If uncertain whether information is about the correct person/company, err on the side of saying "I could not verify..."
+
+RESPONSE FORMATTING:
 - Return ONLY valid JSON, no other text before or after
 - No markdown formatting or backticks
 - Just the raw JSON object starting with { and ending with }`;
+
 
   console.log('Sending request to Anthropic API...');
   
