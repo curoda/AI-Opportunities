@@ -174,65 +174,82 @@ functions.http('generateOpportunities', async (req, res) => {
 });
 
 async function generateOpportunities(name, title, company) {
-  const prompt = `You are researching AI opportunities for a SPECIFIC INDIVIDUAL at their company. Your goal is to find opportunities tailored to what THIS PERSON actually does in their role, not generic company-wide opportunities.
+  const prompt = `You are researching AI opportunities for a SPECIFIC INDIVIDUAL at their company. 
 
 CONTACT INFORMATION:
 - Name: ${name}
 - Title: ${title}
 - Company: ${company}
 
-YOUR RESEARCH PROCESS:
+YOUR TASK:
 
-STEP 1: Research ${name} specifically
+PART 1: CONDUCT THOROUGH RESEARCH (Use web search for all of this)
+
+Research ${name} specifically:
 - Search for "${name} ${company}" to find information about this specific person
-- Look for their LinkedIn profile, bio on company website, interviews, articles they've written, or mentions in news
-- Identify what THEY specifically work on, their projects, their focus areas, their responsibilities
-- Find out their actual day-to-day activities if possible
+- Look for their LinkedIn profile, bio on company website, interviews, articles, mentions in news
+- Find what THEY specifically work on, their projects, focus areas, responsibilities
+- Identify their actual day-to-day activities and sphere of influence
 
-STEP 2: Research ${company} contextually
+Research ${company}:
 - Understand the company's industry and business model
 - Learn about their products, services, and market position
-- Identify how someone with the title "${title}" would typically operate in this type of company
+- Identify the company's scale, location, and key challenges
 
-STEP 3: Understand ${name}'s sphere of influence
-- What decisions can someone in their role make?
-- What processes do they control or influence?
-- What teams or functions do they oversee?
-- What are the specific pain points THEY face (not the whole company)?
+Research the role of "${title}" at ${company}:
+- What does someone with this title typically do at a company like this?
+- What are their likely responsibilities and pain points?
+- What can they control or influence?
 
-STEP 4: Generate 3-6 AI opportunities specifically for ${name}
-- Focus on what ${name} can actually implement or champion given their role
-- Address the specific challenges THEY face in their day-to-day work
-- Make opportunities relevant to their sphere of control and influence
-- DO NOT suggest broad company-wide initiatives unless they clearly fall under this person's responsibilities
+PART 2: DOCUMENT YOUR RESEARCH FINDINGS
+
+Write 2-3 paragraphs summarizing your research:
+
+Paragraph 1 - About ${name}:
+Write a paragraph about who ${name} is, what you learned about them, their background, and their specific role at ${company}. Include the URLs of sources where you found this information.
+
+Paragraph 2 - About ${name}'s Role & Responsibilities:
+Write a paragraph about what ${name} likely does day-to-day in their role as ${title} at ${company}, what they're responsible for, what challenges they face, and what they can control or influence. Include URLs of sources.
+
+Paragraph 3 - About ${company}:
+Write a paragraph about what ${company} does, their industry, their products/services, their scale, and any relevant context about the company. Include URLs of sources.
+
+PART 3: GENERATE 3-6 AI OPPORTUNITIES
+
+Based on your research, generate 3-6 AI opportunities specifically tailored to ${name} and their actual responsibilities. Each opportunity should:
+- Be something ${name} can actually implement or champion given their role
+- Address specific challenges THEY face in their work
+- Be relevant to their sphere of control and influence
+- NOT be generic company-wide initiatives unless they clearly fall under this person's domain
 
 For each opportunity, provide:
 - A clear, specific title (5-8 words)
-- A detailed description (2-3 sentences) explaining:
-  * What AI solution would help ${name} specifically
-  * How it addresses a challenge in THEIR role
-  * The benefit to THEIR work (not just the company overall)
+- A detailed description (2-3 sentences) explaining what the AI solution does and how it helps ${name} specifically
+
+RESPONSE FORMAT:
+
+Return your response as a JSON object with this EXACT structure:
+{
+  "research": {
+    "person": "Paragraph about ${name} with their background and role. Include source URLs.",
+    "role": "Paragraph about ${name}'s responsibilities and day-to-day work as ${title}. Include source URLs.",
+    "company": "Paragraph about ${company} and what they do. Include source URLs."
+  },
+  "opportunities": [
+    {
+      "title": "Opportunity title here",
+      "description": "Detailed description here."
+    }
+  ]
+}
 
 CRITICAL RULES:
-- Opportunities must be relevant to ${name}'s actual role and responsibilities
-- Avoid generic company-wide suggestions unless they're clearly this person's domain
-- Base suggestions on what you learned about ${name} specifically, not just typical responsibilities for their title
-- If you can't find specific information about ${name}, focus deeply on what someone with title "${title}" at a company like ${company} would realistically handle
-
-Return your response as a JSON array with this structure:
-[
-  {
-    "title": "Opportunity title here",
-    "description": "Detailed description here."
-  }
-]
-
-CRITICAL FORMATTING RULES: 
-- Return ONLY valid JSON array, no other text before or after
-- No markdown formatting
-- No backticks
-- No explanatory text
-- Just the raw JSON array starting with [ and ending with ]`;
+- Use web search to find real information about ${name} and ${company}
+- Include actual source URLs in your research paragraphs
+- Make opportunities specific to what ${name} can actually do in their role
+- Return ONLY valid JSON, no other text before or after
+- No markdown formatting or backticks
+- Just the raw JSON object starting with { and ending with }`;
 
   console.log('Sending request to Anthropic API...');
   
@@ -262,15 +279,24 @@ CRITICAL FORMATTING RULES:
     opportunities = JSON.parse(cleanedResponse);
     
     // Validate response structure
-    if (!Array.isArray(opportunities) || opportunities.length === 0) {
-      throw new Error('Invalid response format');
+    if (!opportunities.research || !opportunities.opportunities) {
+      throw new Error('Invalid response format - missing research or opportunities');
+    }
+    
+    if (!Array.isArray(opportunities.opportunities) || opportunities.opportunities.length === 0) {
+      throw new Error('Invalid response format - opportunities must be an array');
     }
     
     // Validate each opportunity has required fields
-    for (const opp of opportunities) {
+    for (const opp of opportunities.opportunities) {
       if (!opp.title || !opp.description) {
         throw new Error('Invalid opportunity format');
       }
+    }
+    
+    // Validate research has required fields
+    if (!opportunities.research.person || !opportunities.research.role || !opportunities.research.company) {
+      throw new Error('Invalid research format');
     }
     
   } catch (parseError) {
@@ -298,9 +324,12 @@ async function logToSheet(data) {
     const sheet = doc.sheetsByIndex[0];
     
     // Format opportunities as text
-    const opportunitiesText = data.opportunities
+    const opportunitiesText = data.opportunities.opportunities
       .map((opp, idx) => `${idx + 1}. ${opp.title}: ${opp.description}`)
       .join('\n\n');
+    
+    // Format research as text
+    const researchText = `PERSON: ${data.opportunities.research.person}\n\nROLE: ${data.opportunities.research.role}\n\nCOMPANY: ${data.opportunities.research.company}`;
     
     // Add row to sheet
     await sheet.addRow({
@@ -308,6 +337,7 @@ async function logToSheet(data) {
       Name: data.name,
       Title: data.title,
       Company: data.company,
+      Research: researchText,
       Opportunities: opportunitiesText
     });
     
