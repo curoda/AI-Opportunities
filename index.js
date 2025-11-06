@@ -245,24 +245,41 @@ async function logToSheet(data) {
 const app = express();
 app.use(express.json());
 
-// CORS (same allowlist)
-const allowedOrigins = [
+// ----- Robust CORS (place before routes) -----
+const allowedOrigins = new Set([
   'https://helloeiko.com',
   'https://www.helloeiko.com',
   'http://helloeiko.com',
   'http://www.helloeiko.com'
-];
+]);
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+  const reqHeaders = req.headers['access-control-request-headers'];
+  const reqMethod  = req.headers['access-control-request-method'];
+
+  // Always advertise capabilities (helps caches & proxies)
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', reqHeaders || 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '3600');
-  res.setHeader('Vary', 'Origin');
-  if (req.method === 'OPTIONS') return res.status(204).send('');
+  res.setHeader('Vary', 'Origin, Access-Control-Request-Headers, Access-Control-Request-Method');
+
+  // Reflect only approved origins
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    // If you ever use cookies/credentials, also set:
+    // res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+
+  // Short-circuit preflight
+  if (req.method === 'OPTIONS') {
+    if (reqMethod) res.setHeader('Access-Control-Allow-Methods', reqMethod);
+    return res.status(204).end();
+  }
+
   next();
 });
+
 
 // Health check (useful for Cloud Run)
 app.get('/', (_req, res) => res.status(200).send('ok'));
