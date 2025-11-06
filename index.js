@@ -127,16 +127,17 @@ Return ONLY valid JSON (no markdown) in this exact schema:
     const phase1 = await openai.responses.create(
   {
     model,
-    input: phase1Prompt,
+    input: phase1Prompt,                 // your prompt already says "LinkedIn ONLY"
     tool_choice: 'auto',
-    tools: [{ type: 'web_search', sites: ['linkedin.com'] }],
-    text: { format: 'json_object' }
+    tools: [{ type: 'web_search' }],     // ⬅️ removed `sites`
+    text: { format: { type: 'json_object' } }  // ⬅️ correct shape
   },
   {
     signal: controller1.signal,
     timeout: Number(process.env.OPENAI_TIMEOUT_MS || 60000)
   }
 );
+
     const phase1Text = cleanJsonText(getResponseText(phase1));
     p1 = JSON.parse(phase1Text || '{}');
   } catch (e) {
@@ -193,10 +194,10 @@ VERIFICATION GUARDRAILS:
     input: phase2Prompt,
     tool_choice: 'auto',
     tools: [{ type: 'web_search' }],
-    text: { format: 'json_object' }
+    text: { format: { type: 'json_object' } }  // ⬅️ correct shape
   },
   {
-    signal: controller2.signal,           // ✅
+    signal: controller2.signal,
     timeout: Number(process.env.OPENAI_TIMEOUT_MS || 60000)
   }
 );
